@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Performance Benchmarks</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            margin: 0; 
+            padding: 20px; 
+            background-color: #f5f5f5; 
+        }
+        .container { 
+            max-width: 1000px; 
+            margin: 0 auto; 
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 { 
+            color: #333; 
+            text-align: center; 
+            margin-bottom: 30px;
+            border-bottom: 2px solid #007acc;
+            padding-bottom: 10px;
+        }
+        .benchmark-item { 
+            margin: 20px 0; 
+            padding: 20px; 
+            border: 1px solid #e0e0e0; 
+            border-radius: 8px; 
+            background: #fafafa;
+        }
+        .benchmark-name { 
+            font-size: 18px; 
+            font-weight: bold; 
+            color: #333; 
+            margin-bottom: 10px;
+        }
+        .benchmark-value { 
+            font-size: 32px; 
+            font-weight: bold; 
+            color: #007acc; 
+        }
+        .benchmark-unit { 
+            color: #666; 
+            font-size: 20px;
+        }
+        .chart-container {
+            margin-top: 40px;
+            padding: 20px;
+            background: #fafafa;
+            border-radius: 8px;
+        }
+        .timestamp {
+            text-align: center;
+            color: #666;
+            font-size: 14px;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📊 Performance Benchmarks Dashboard</h1>
+        <div id="benchmarks"></div>
+        <div class="chart-container">
+            <canvas id="chart" width="400" height="200"></canvas>
+        </div>
+        <div class="timestamp" id="timestamp"></div>
+    </div>
+    <script>
+        // Load benchmark data
+        fetch('benchmark-results.json')
+            .then(response => response.json())
+            .then(data => {
+                const container = document.getElementById('benchmarks');
+
+                if (data.length === 0) {
+                    container.innerHTML = '<div class="benchmark-item">No benchmark results found</div>';
+                    return;
+                }
+
+                data.forEach(benchmark => {
+                    const div = document.createElement('div');
+                    div.className = 'benchmark-item';
+                    div.innerHTML = `
+                        <div class="benchmark-name">${benchmark.name}</div>
+                        <div class="benchmark-value">${benchmark.value.toFixed(3)} <span class="benchmark-unit">${benchmark.unit}</span></div>
+                    `;
+                    container.appendChild(div);
+                });
+
+                // Create chart
+                const ctx = document.getElementById('chart').getContext('2d');
+                new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: data.map(b => b.name.replace(/.*\./, '')), // Remove class prefix
+                        datasets: [{
+                            label: `Performance (${data[0]?.unit || 'μs'})`,
+                            data: data.map(b => b.value),
+                            backgroundColor: 'rgba(0, 122, 204, 0.2)',
+                            borderColor: 'rgba(0, 122, 204, 1)',
+                            borderWidth: 2
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        scales: {
+                            y: { 
+                                beginAtZero: true,
+                                title: {
+                                    display: true,
+                                    text: `Time (${data[0]?.unit || 'μs'})`
+                                }
+                            },
+                            x: {
+                                title: {
+                                    display: true,
+                                    text: 'Benchmark Tests'
+                                }
+                            }
+                        },
+                        plugins: {
+                            title: {
+                                display: true,
+                                text: 'Benchmark Performance Results'
+                            }
+                        }
+                    }
+                });
+
+                // Show timestamp
+                document.getElementById('timestamp').innerHTML = `Last updated: ${new Date().toLocaleString()}`;
+            })
+            .catch(error => {
+                console.error('Error loading benchmark data:', error);
+                document.getElementById('benchmarks').innerHTML = '<div class="benchmark-item">Error loading benchmark results</div>';
+            });
+    </script>
+</body>
+</html>
