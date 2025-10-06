@@ -51,7 +51,6 @@ dependencies {
     androidTestImplementation(libs.androidx.benchmark.junit4)
 }
 
-// Add the report generation task
 tasks.register("generateBenchmarkReport") {
     group = "verification"
     description = "Generates JSON report for GitHub Actions"
@@ -71,26 +70,29 @@ tasks.register("generateBenchmarkReport") {
         val results = mutableListOf<Map<String, Any>>()
         var filesProcessed = 0
 
+        // Walk through ALL subdirectories to find JSON files
         benchmarkResultsDir.get().asFile.walkTopDown().forEach { file ->
-            if (file.isFile && file.extension == "json") {
-                println("📄 Processing: ${file.name}")
+            if (file.isFile && file.extension == "json" && file.name.contains("benchmarkData")) {
+                println("📄 Processing: ${file.name} at ${file.absolutePath}")
                 filesProcessed++
 
                 try {
                     val content = file.readText()
-                    println("📄 Content preview: ${content.take(300)}...")
+                    println("📄 Content preview: ${content.take(200)}...")
 
-                    // Extract benchmark data using simple regex
+                    // Parse the JSON content
                     val nameRegex = """"name"\s*:\s*"([^"]+)"""".toRegex()
                     val medianRegex = """"median"\s*:\s*([\d.]+)""".toRegex()
 
-                    val nameMatches = nameRegex.findAll(content)
-                    val medianMatches = medianRegex.findAll(content)
+                    val nameMatches = nameRegex.findAll(content).toList()
+                    val medianMatches = medianRegex.findAll(content).toList()
 
-                    val names = nameMatches.map { it.groupValues[1] }.toList()
-                    val medians = medianMatches.map { it.groupValues[1].toDoubleOrNull() ?: 0.0 }.toList()
+                    println("🔍 Found ${nameMatches.size} test names and ${medianMatches.size} median values")
 
-                    names.zip(medians).forEach { (name, median) ->
+                    nameMatches.zip(medianMatches).forEach { (nameMatch, medianMatch) ->
+                        val name = nameMatch.groupValues[1]
+                        val median = medianMatch.groupValues[1].toDoubleOrNull() ?: 0.0
+
                         if (median > 0) {
                             results.add(mapOf(
                                 "name" to name,
@@ -111,7 +113,7 @@ tasks.register("generateBenchmarkReport") {
         } + "]"
 
         outputFile.writeText(jsonOutput)
-        println("📊 Generated report with ${results.size} benchmarks")
+        println("📊 Generated report with ${results.size} benchmarks from $filesProcessed files")
         println("📊 Report content: $jsonOutput")
     }
 }
