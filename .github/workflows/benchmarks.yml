@@ -9,6 +9,7 @@ on:
 jobs:
   benchmarks:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - name: Checkout code
@@ -29,35 +30,78 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle.properties') }}
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*') }}
           restore-keys: |
             ${{ runner.os }}-gradle-
 
-      - name: Enable KVM group perms
+      - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
+          ls -la /dev/kvm
 
-      - name: Grant execute permission for gradlew
+      - name: Grant execute permission
         run: chmod +x gradlew
 
-      - name: Run Benchmarks
+      - name: AVD cache
+        uses: actions/cache@v4
+        id: avd-cache
+        with:
+          path: |
+            ~/.android/avd/*
+            ~/.android/adb*
+          key: avd-29-${{ runner.os }}
+
+      - name: Create AVD and generate snapshot for caching
+        if: steps.avd-cache.outputs.cache-hit != 'true'
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 30
-          target: google_apis
+          api-level: 29
+          target: default
           arch: x86_64
           profile: Nexus 6
+          force-avd-creation: false
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: false
+          script: echo "Generated AVD snapshot for caching."
+
+      - name: Run Benchmarks on Emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 29
+          target: default
+          arch: x86_64
+          profile: Nexus 6
+          force-avd-creation: false
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
-          script: ./gradlew :benchmark:connectedAndroidTest --stacktrace
+          script: |
+            echo "🚀 Starting benchmark execution..."
+            adb shell settings put global window_animation_scale 0.0
+            adb shell settings put global transition_animation_scale 0.0
+            adb shell settings put global animator_duration_scale 0.0
+            echo "📱 Running benchmarks..."
+            ./gradlew :benchmark:connectedDebugAndroidTest --continue --stacktrace
+            echo "✅ Benchmark execution completed"
 
       - name: Generate Benchmark Report
         if: always()
-        run: ./gradlew :benchmark:generateBenchmarkReport --stacktrace
+        run: |
+          echo "📊 Generating benchmark report..."
+          ./gradlew :benchmark:generateBenchmarkReport --stacktrace
 
-      - name: Upload Benchmark Results
+      - name: Display Results
+        if: always()
+        run: |
+          echo "📊 Benchmark Results:"
+          if [ -f benchmark-results.json ]; then
+            cat benchmark-results.json
+          else
+            echo "No benchmark-results.json found"
+          fi
+
+      - name: Upload Benchmark Results to GitHub Pages
         if: always()
         uses: benchmark-action/github-action-benchmark@v1
         with:
@@ -68,12 +112,13 @@ jobs:
           comment-on-alert: true
           alert-threshold: '150%'
           fail-on-alert: false
+          summary-always: true
 
       - name: Upload benchmark artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: benchmark-results
+          name: benchmark-results-${{ github.run_number }}
           path: |
             benchmark-results.json
             benchmark/build/outputs/connected_android_test_additional_output/
