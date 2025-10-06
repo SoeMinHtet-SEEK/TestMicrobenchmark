@@ -20,10 +20,23 @@ class ExampleBenchmark {
     @get:Rule
     val benchmarkRule = BenchmarkRule()
 
+    data class Count(
+        val count: Int
+    )
+
     @Test
     fun log() {
         benchmarkRule.measureRepeated {
             Log.d("LogBenchmark", "the cost of writing this log method will be measured")
+        }
+    }
+
+    @Test
+    fun loop() {
+        benchmarkRule.measureRepeated {
+            for (i in 1..100) {
+                Count(count = i)
+            }
         }
     }
 }
