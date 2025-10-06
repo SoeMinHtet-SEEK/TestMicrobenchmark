@@ -1,4 +1,4 @@
-name: Performance Benchmarks
+name: Performance Benchmarks (Debug)
 
 on:
   push:
@@ -24,24 +24,21 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Cache Gradle
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*') }}
-          restore-keys: |
-            ${{ runner.os }}-gradle-
+      - name: Grant execute permission
+        run: chmod +x gradlew
+
+      - name: Check Available Tasks
+        run: |
+          echo "🔍 Checking available benchmark tasks..."
+          ./gradlew :benchmark:tasks --group=verification
+          echo "📋 All benchmark tasks:"
+          ./gradlew :benchmark:tasks | grep -i test
 
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-
-      - name: Grant execute permission
-        run: chmod +x gradlew
 
       - name: AVD cache
         uses: actions/cache@v4
@@ -50,9 +47,9 @@ jobs:
           path: |
             ~/.android/avd/*
             ~/.android/adb*
-          key: avd-29-${{ runner.os }}
+          key: avd-29-debug
 
-      - name: Create AVD and generate snapshot for caching
+      - name: Create AVD
         if: steps.avd-cache.outputs.cache-hit != 'true'
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -61,11 +58,11 @@ jobs:
           arch: x86_64
           profile: Nexus 6
           force-avd-creation: false
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
           disable-animations: false
-          script: echo "Generated AVD snapshot for caching."
+          script: echo "Generated AVD snapshot"
 
-      - name: Run Benchmarks on Emulator
+      - name: Run Benchmarks with Debug
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 29
@@ -73,51 +70,50 @@ jobs:
           arch: x86_64
           profile: Nexus 6
           force-avd-creation: false
-          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
           disable-animations: true
           script: |
             echo "🚀 Starting benchmark execution..."
             adb shell settings put global window_animation_scale 0.0
             adb shell settings put global transition_animation_scale 0.0
             adb shell settings put global animator_duration_scale 0.0
-            echo "📱 Running benchmarks..."
-            ./gradlew :benchmark:connectedAndroidTest --continue --stacktrace
-            echo "✅ Benchmark execution completed"
+            
+            echo "📱 Running benchmark test..."
+            echo "Trying connectedAndroidTest first..."
+            ./gradlew :benchmark:connectedAndroidTest --stacktrace --info || echo "connectedAndroidTest failed"
+            
+            echo "🔍 Checking what got created after test run..."
+            echo "Build directory contents:"
+            find benchmark/build -type f -name "*.json" 2>/dev/null || echo "No JSON files found"
+            
+            echo "All files in outputs:"
+            find benchmark/build/outputs -type f 2>/dev/null || echo "No outputs directory"
+            
+            echo "Checking for any test results:"
+            find benchmark/build -name "*test*" -type d 2>/dev/null || echo "No test directories"
+            
+            echo "✅ Debug information collected"
 
-      - name: Generate Benchmark Report
+      - name: Debug Report Generation
         if: always()
         run: |
-          echo "📊 Generating benchmark report..."
-          ./gradlew :benchmark:generateBenchmarkReport --stacktrace
+          echo "📊 Debug: Generating benchmark report..."
+          ./gradlew :benchmark:generateBenchmarkReport --stacktrace --debug
 
-      - name: Display Results
+      - name: Show All Generated Files
         if: always()
         run: |
-          echo "📊 Benchmark Results:"
-          if [ -f benchmark-results.json ]; then
-            cat benchmark-results.json
-          else
-            echo "No benchmark-results.json found"
-          fi
+          echo "📊 All files in project after benchmark run:"
+          find . -name "*.json" -type f 2>/dev/null || echo "No JSON files anywhere"
+          
+          echo "Contents of benchmark-results.json (if exists):"
+          cat benchmark-results.json 2>/dev/null || echo "benchmark-results.json not found"
 
-      - name: Upload Benchmark Results to GitHub Pages
-        if: always()
-        uses: benchmark-action/github-action-benchmark@v1
-        with:
-          tool: 'customSmallerIsBetter'
-          output-file-path: benchmark-results.json
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          auto-push: true
-          comment-on-alert: true
-          alert-threshold: '150%'
-          fail-on-alert: false
-          summary-always: true
-
-      - name: Upload benchmark artifacts
+      - name: Upload Debug Artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: benchmark-results-${{ github.run_number }}
+          name: debug-output-${{ github.run_number }}
           path: |
+            benchmark/build/
             benchmark-results.json
-            benchmark/build/outputs/connected_android_test_additional_output/
