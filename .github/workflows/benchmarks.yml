@@ -127,19 +127,48 @@ jobs:
           # Generate metrics in Prometheus format
           echo "📈 Generating metrics..."
           chmod +x scripts/push_to_grafana.py
+          chmod +x scripts/metrics_server.py
           python3 scripts/push_to_grafana.py benchmark-results.json
+          
+          echo ""
+          echo "🚀 Starting metrics server for Alloy to scrape..."
+          
+          # Start a simple HTTP server to serve metrics
+          python3 scripts/metrics_server.py 9091 > metrics_server.log 2>&1 &
+          METRICS_SERVER_PID=$!
+          
+          # Wait for server to start
+          sleep 3
+          
+          # Verify server is running
+          if ! kill -0 $METRICS_SERVER_PID 2>/dev/null; then
+            echo "❌ Metrics server failed to start"
+            exit 1
+          fi
+          
+          # Test the metrics endpoint
+          echo "🔍 Testing metrics endpoint..."
+          if curl -s http://127.0.0.1:9091/metrics | head -n 3; then
+            echo "✅ Metrics endpoint is responding"
+          else
+            echo "❌ Metrics endpoint not responding"
+            exit 1
+          fi
           
           echo ""
           echo "🚀 Setting up Alloy to push metrics..."
           
-          # Create Alloy configuration for remote write
+          # Create Alloy configuration that scrapes our local endpoint
           cat > alloy-config.alloy << 'EOF'
-          // Expose a local endpoint that accepts Prometheus metrics
-          prometheus.receive_http "benchmark_receiver" {
-            http {
-              listen_address = "127.0.0.1"
-              listen_port    = 9090
-            }
+          // Scrape metrics from local endpoint
+          prometheus.scrape "benchmark_scraper" {
+            targets = [{
+              __address__ = "127.0.0.1:9091",
+              job         = "android_benchmarks",
+            }]
+            
+            scrape_interval = "5s"
+            scrape_timeout  = "4s"
             
             forward_to = [prometheus.remote_write.grafana_cloud.receiver]
           }
@@ -157,6 +186,8 @@ jobs:
               queue_config {
                 capacity = 10000
                 max_shards = 1
+                max_samples_per_send = 5000
+                batch_send_deadline = "5s"
               }
             }
           }
@@ -169,65 +200,72 @@ jobs:
           alloy run alloy-config.alloy > alloy.log 2>&1 &
           ALLOY_PID=$!
           
-          # Wait for Alloy to start
-          echo "⏳ Waiting for Alloy to initialize..."
-          sleep 8
+          # Wait for Alloy to start and scrape
+          echo "⏳ Waiting for Alloy to scrape and push metrics..."
+          sleep 15
           
-          # Check if Alloy is running
+          # Check if Alloy is still running
           if ! kill -0 $ALLOY_PID 2>/dev/null; then
-            echo "❌ Alloy failed to start. Check logs:"
+            echo "❌ Alloy stopped unexpectedly. Check logs:"
             cat alloy.log
             exit 1
           fi
           
           echo "✅ Alloy is running (PID: $ALLOY_PID)"
           
-          # Convert our text metrics to the write request and push to Alloy
+          # Check Alloy logs for scrape activity
           echo ""
-          echo "📤 Pushing metrics through Alloy to Grafana Cloud..."
-          
-          # Post metrics to Alloy's receive endpoint
-          HTTP_CODE=$(curl -w "%{http_code}" -o response.txt -s \
-            -X POST \
-            -H "Content-Type: application/x-protobuf" \
-            -H "X-Prometheus-Remote-Write-Version: 0.1.0" \
-            --data-binary @metrics.txt \
-            http://127.0.0.1:9090/api/v1/write 2>&1 | tail -n1)
-          
-          echo "   Response code: $HTTP_CODE"
-          
-          if [ -f response.txt ]; then
-            cat response.txt
+          echo "📋 Checking Alloy scrape activity..."
+          if grep -i "scrape" alloy.log | tail -n 5; then
+            echo "✅ Alloy is scraping metrics"
+          else
+            echo "⚠️  No scrape activity detected yet"
           fi
           
-          # Give Alloy time to flush to Grafana Cloud
+          # Give more time for remote write to complete
           echo ""
-          echo "⏳ Waiting for metrics to be sent to Grafana Cloud..."
+          echo "⏳ Allowing time for metrics to be sent to Grafana Cloud..."
           sleep 10
           
-          # Check Alloy logs for success
+          # Check for errors
           echo ""
-          echo "📋 Alloy activity log:"
-          if grep -i "error" alloy.log; then
-            echo "⚠️  Errors detected in Alloy logs"
+          echo "📋 Checking for errors in Alloy logs..."
+          if grep -i "error\|failed\|unable" alloy.log | grep -v "failed to start reporter"; then
+            echo "⚠️  Some errors detected (may be non-critical)"
           else
-            echo "✅ No errors in Alloy logs"
+            echo "✅ No critical errors detected"
           fi
           
-          # Stop Alloy
+          # Check for successful remote writes
           echo ""
-          echo "🛑 Stopping Alloy..."
+          echo "📋 Checking for successful remote writes..."
+          if grep -i "succeeded\|sent\|samples" alloy.log | tail -n 5; then
+            echo "✅ Found remote write activity"
+          else
+            echo "⚠️  No clear confirmation of successful push"
+          fi
+          
+          # Stop services
+          echo ""
+          echo "🛑 Stopping services..."
           kill $ALLOY_PID 2>/dev/null || true
+          kill $METRICS_SERVER_PID 2>/dev/null || true
           sleep 2
           
-          # Show final log excerpt
+          # Show final summary
           echo ""
-          echo "📊 Final Alloy log excerpt:"
-          tail -n 30 alloy.log
+          echo "📊 Final Alloy log summary:"
+          echo "=========================="
+          tail -n 40 alloy.log
           
           echo ""
-          echo "✅ Metrics push completed!"
-          echo "📊 Check your Grafana Cloud dashboard for 'android_benchmark_*' metrics"
+          echo "✅ Metrics push process completed!"
+          echo ""
+          echo "📊 To verify metrics arrived in Grafana Cloud:"
+          echo "   1. Go to your Grafana Cloud instance"
+          echo "   2. Click 'Explore' → Select Prometheus data source"
+          echo "   3. Query: {__name__=~\"android_benchmark.*\"}"
+          echo "   4. If you see data → Success! If not, check logs above."
 
       - name: Upload benchmark artifacts
         if: always()
