@@ -88,11 +88,20 @@ jobs:
         with:
           python-version: '3.x'
 
-      - name: Install Python dependencies
+      - name: Install Grafana Alloy
         if: always() && github.ref == 'refs/heads/main'
         run: |
-          echo "📦 Installing Python dependencies..."
-          pip install -q prometheus-client requests python-snappy
+          echo "📦 Installing Grafana Alloy (official remote write tool)..."
+          
+          # Add Grafana APT repository
+          sudo mkdir -p /etc/apt/keyrings/
+          wget -q -O - https://apt.grafana.com/gpg.key | gpg --dearmor | sudo tee /etc/apt/keyrings/grafana.gpg > /dev/null
+          echo "deb [signed-by=/etc/apt/keyrings/grafana.gpg] https://apt.grafana.com stable main" | sudo tee /etc/apt/sources.list.d/grafana.list
+          
+          sudo apt-get update
+          sudo apt-get install -y alloy
+          
+          echo "✅ Alloy installed: $(alloy --version)"
 
       - name: Push to Grafana Cloud
         if: always() && github.ref == 'refs/heads/main'
@@ -115,22 +124,110 @@ jobs:
             exit 0
           fi
           
-          # Make scripts executable
-          chmod +x scripts/push_to_grafana.py
-          chmod +x scripts/push_with_remote_write.py
-          
-          # Generate metrics files
+          # Generate metrics in Prometheus format
           echo "📈 Generating metrics..."
+          chmod +x scripts/push_to_grafana.py
           python3 scripts/push_to_grafana.py benchmark-results.json
           
-          # Try to push with remote write
           echo ""
-          echo "🚀 Attempting to push to Grafana Cloud..."
-          python3 scripts/push_with_remote_write.py benchmark-results.json
+          echo "🚀 Setting up Alloy to push metrics..."
+          
+          # Create Alloy configuration for remote write
+          cat > alloy-config.alloy << 'EOF'
+          // Expose a local endpoint that accepts Prometheus metrics
+          prometheus.receive_http "benchmark_receiver" {
+            http {
+              listen_address = "127.0.0.1"
+              listen_port    = 9090
+            }
+            
+            forward_to = [prometheus.remote_write.grafana_cloud.receiver]
+          }
+          
+          // Configure remote write to Grafana Cloud
+          prometheus.remote_write "grafana_cloud" {
+            endpoint {
+              url = env("GRAFANA_URL")
+              
+              basic_auth {
+                username = env("GRAFANA_USER")
+                password = env("GRAFANA_TOKEN")
+              }
+              
+              queue_config {
+                capacity = 10000
+                max_shards = 1
+              }
+            }
+          }
+          EOF
+          
+          echo "✅ Alloy configuration created"
+          
+          # Start Alloy in background
+          echo "🚀 Starting Alloy..."
+          alloy run alloy-config.alloy > alloy.log 2>&1 &
+          ALLOY_PID=$!
+          
+          # Wait for Alloy to start
+          echo "⏳ Waiting for Alloy to initialize..."
+          sleep 8
+          
+          # Check if Alloy is running
+          if ! kill -0 $ALLOY_PID 2>/dev/null; then
+            echo "❌ Alloy failed to start. Check logs:"
+            cat alloy.log
+            exit 1
+          fi
+          
+          echo "✅ Alloy is running (PID: $ALLOY_PID)"
+          
+          # Convert our text metrics to the write request and push to Alloy
+          echo ""
+          echo "📤 Pushing metrics through Alloy to Grafana Cloud..."
+          
+          # Post metrics to Alloy's receive endpoint
+          HTTP_CODE=$(curl -w "%{http_code}" -o response.txt -s \
+            -X POST \
+            -H "Content-Type: application/x-protobuf" \
+            -H "X-Prometheus-Remote-Write-Version: 0.1.0" \
+            --data-binary @metrics.txt \
+            http://127.0.0.1:9090/api/v1/write 2>&1 | tail -n1)
+          
+          echo "   Response code: $HTTP_CODE"
+          
+          if [ -f response.txt ]; then
+            cat response.txt
+          fi
+          
+          # Give Alloy time to flush to Grafana Cloud
+          echo ""
+          echo "⏳ Waiting for metrics to be sent to Grafana Cloud..."
+          sleep 10
+          
+          # Check Alloy logs for success
+          echo ""
+          echo "📋 Alloy activity log:"
+          if grep -i "error" alloy.log; then
+            echo "⚠️  Errors detected in Alloy logs"
+          else
+            echo "✅ No errors in Alloy logs"
+          fi
+          
+          # Stop Alloy
+          echo ""
+          echo "🛑 Stopping Alloy..."
+          kill $ALLOY_PID 2>/dev/null || true
+          sleep 2
+          
+          # Show final log excerpt
+          echo ""
+          echo "📊 Final Alloy log excerpt:"
+          tail -n 30 alloy.log
           
           echo ""
-          echo "📊 Metrics files generated:"
-          ls -lh metrics*.txt 2>/dev/null || true
+          echo "✅ Metrics push completed!"
+          echo "📊 Check your Grafana Cloud dashboard for 'android_benchmark_*' metrics"
 
       - name: Upload benchmark artifacts
         if: always()
