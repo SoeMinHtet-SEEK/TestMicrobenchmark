@@ -88,6 +88,12 @@ jobs:
         with:
           python-version: '3.x'
 
+      - name: Install Python dependencies
+        if: always() && github.ref == 'refs/heads/main'
+        run: |
+          echo "📦 Installing Python dependencies..."
+          pip install -q prometheus-client requests python-snappy
+
       - name: Push to Grafana Cloud
         if: always() && github.ref == 'refs/heads/main'
         env:
@@ -109,238 +115,22 @@ jobs:
             exit 0
           fi
           
-          # Make script executable
+          # Make scripts executable
           chmod +x scripts/push_to_grafana.py
+          chmod +x scripts/push_with_remote_write.py
           
-          # Parse benchmark results and generate metrics
+          # Generate metrics files
+          echo "📈 Generating metrics..."
           python3 scripts/push_to_grafana.py benchmark-results.json
           
-          # Check if metrics were generated
-          if [ ! -f "metrics.txt" ]; then
-            echo "❌ metrics.txt not generated"
-            exit 1
-          fi
-          
-          echo "📈 Metrics generated:"
-          echo "- Prometheus format: metrics.txt ($(wc -l < metrics.txt) lines)"
-          echo "- InfluxDB format: metrics_influx.txt ($(wc -l < metrics_influx.txt) lines)"
+          # Try to push with remote write
           echo ""
+          echo "🚀 Attempting to push to Grafana Cloud..."
+          python3 scripts/push_with_remote_write.py benchmark-results.json
           
-          # Note about Grafana Cloud endpoint compatibility
-          echo "ℹ️  Note: Grafana Cloud's /api/prom/push endpoint requires Snappy compression"
-          echo "   which is not easily achievable with basic shell tools."
           echo ""
-          echo "📊 Recommended alternatives:"
-          echo "   1. Use GitHub Pages dashboard (already configured below)"
-          echo "   2. Use Grafana Alloy/Agent for proper remote write"
-          echo "   3. Set up a Prometheus Pushgateway"
-          echo ""
-          echo "⏭️  Skipping direct push to Grafana Cloud for now."
-          echo "   Your metrics are saved in artifacts and visible on GitHub Pages."
-
-      - name: Create Benchmark Dashboard
-        if: always() && github.ref == 'refs/heads/main'
-        run: |
-          # Create a simple HTML dashboard
-          mkdir -p benchmark-dashboard
-          cat > benchmark-dashboard/index.html << 'EOF'
-          <!DOCTYPE html>
-          <html>
-          <head>
-              <title>Performance Benchmarks</title>
-              <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-              <style>
-                  body { 
-                      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
-                      margin: 0; 
-                      padding: 20px; 
-                      background-color: #f5f5f5; 
-                  }
-                  .container { 
-                      max-width: 1200px; 
-                      margin: 0 auto; 
-                      background: white;
-                      padding: 30px;
-                      border-radius: 8px;
-                      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-                  }
-                  h1 { 
-                      color: #333; 
-                      text-align: center; 
-                      margin-bottom: 30px;
-                      border-bottom: 2px solid #007acc;
-                      padding-bottom: 10px;
-                  }
-                  .info-box {
-                      background: #f0f8ff;
-                      padding: 15px;
-                      border-radius: 5px;
-                      margin-bottom: 20px;
-                      border-left: 4px solid #007acc;
-                  }
-                  .benchmark-item { 
-                      margin: 20px 0; 
-                      padding: 20px; 
-                      border: 1px solid #e0e0e0; 
-                      border-radius: 8px; 
-                      background: #fafafa;
-                  }
-                  .benchmark-name { 
-                      font-size: 18px; 
-                      font-weight: bold; 
-                      color: #333; 
-                      margin-bottom: 10px;
-                  }
-                  .benchmark-value { 
-                      font-size: 24px; 
-                      font-weight: bold; 
-                      color: #007acc; 
-                  }
-                  .benchmark-allocations {
-                      font-size: 16px;
-                      color: #666;
-                      margin-top: 5px;
-                  }
-                  .chart-container {
-                      margin-top: 40px;
-                      padding: 20px;
-                      background: #fafafa;
-                      border-radius: 8px;
-                  }
-                  .timestamp {
-                      text-align: center;
-                      color: #666;
-                      font-size: 14px;
-                      margin-top: 20px;
-                  }
-              </style>
-          </head>
-          <body>
-              <div class="container">
-                  <h1>📊 Performance Benchmarks Dashboard</h1>
-                  <div class="info-box" id="metadata"></div>
-                  <div id="benchmarks"></div>
-                  <div class="chart-container">
-                      <h2>Execution Time</h2>
-                      <canvas id="timeChart" width="400" height="200"></canvas>
-                  </div>
-                  <div class="chart-container">
-                      <h2>Memory Allocations</h2>
-                      <canvas id="allocChart" width="400" height="200"></canvas>
-                  </div>
-                  <div class="timestamp" id="timestamp"></div>
-              </div>
-              <script>
-                  fetch('benchmark-results.json')
-                      .then(response => response.json())
-                      .then(data => {
-                          // Show metadata
-                          const metadata = document.getElementById('metadata');
-                          metadata.innerHTML = `
-                              <strong>Commit:</strong> ${data.gitCommit} | 
-                              <strong>Device:</strong> ${data.device} | 
-                              <strong>Brand:</strong> ${data.brand}
-                          `;
-
-                          const container = document.getElementById('benchmarks');
-                          const benchmarks = data.benchmarks || [];
-          
-                          if (benchmarks.length === 0) {
-                              container.innerHTML = '<div class="benchmark-item">No benchmark results found</div>';
-                              return;
-                          }
-          
-                          benchmarks.forEach(benchmark => {
-                              const div = document.createElement('div');
-                              div.className = 'benchmark-item';
-                              const timeMs = (benchmark.medianTimeNs / 1000000).toFixed(3);
-                              div.innerHTML = `
-                                  <div class="benchmark-name">${benchmark.testName}</div>
-                                  <div class="benchmark-value">${timeMs} ms</div>
-                                  <div class="benchmark-allocations">
-                                      Allocations: ${benchmark.medianAllocationCount} | 
-                                      Iterations: ${benchmark.iterations}
-                                  </div>
-                              `;
-                              container.appendChild(div);
-                          });
-          
-                          // Time chart
-                          const timeCtx = document.getElementById('timeChart').getContext('2d');
-                          new Chart(timeCtx, {
-                              type: 'bar',
-                              data: {
-                                  labels: benchmarks.map(b => b.testName.replace(/.*\./, '')),
-                                  datasets: [{
-                                      label: 'Time (ms)',
-                                      data: benchmarks.map(b => b.medianTimeNs / 1000000),
-                                      backgroundColor: 'rgba(0, 122, 204, 0.2)',
-                                      borderColor: 'rgba(0, 122, 204, 1)',
-                                      borderWidth: 2
-                                  }]
-                              },
-                              options: {
-                                  responsive: true,
-                                  scales: {
-                                      y: { 
-                                          beginAtZero: true,
-                                          title: { display: true, text: 'Time (ms)' }
-                                      }
-                                  }
-                              }
-                          });
-
-                          // Allocation chart
-                          const allocCtx = document.getElementById('allocChart').getContext('2d');
-                          new Chart(allocCtx, {
-                              type: 'bar',
-                              data: {
-                                  labels: benchmarks.map(b => b.testName.replace(/.*\./, '')),
-                                  datasets: [{
-                                      label: 'Allocations',
-                                      data: benchmarks.map(b => b.medianAllocationCount),
-                                      backgroundColor: 'rgba(255, 99, 132, 0.2)',
-                                      borderColor: 'rgba(255, 99, 132, 1)',
-                                      borderWidth: 2
-                                  }]
-                              },
-                              options: {
-                                  responsive: true,
-                                  scales: {
-                                      y: { 
-                                          beginAtZero: true,
-                                          title: { display: true, text: 'Allocations' }
-                                      }
-                                  }
-                              }
-                          });
-          
-                          document.getElementById('timestamp').innerHTML = `Last updated: ${new Date(data.timestamp).toLocaleString()}`;
-                      })
-                      .catch(error => {
-                          console.error('Error loading benchmark data:', error);
-                          document.getElementById('benchmarks').innerHTML = '<div class="benchmark-item">Error loading benchmark results</div>';
-                      });
-              </script>
-          </body>
-          </html>
-          EOF
-          
-          # Copy benchmark results
-          cp benchmark-results.json benchmark-dashboard/
-          
-          echo "📊 Created benchmark dashboard"
-          ls -la benchmark-dashboard/
-
-      - name: Deploy to GitHub Pages
-        if: always() && github.ref == 'refs/heads/main'
-        uses: peaceiris/actions-gh-pages@v3
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./benchmark-dashboard
-          commit_message: 'Update benchmark dashboard'
-          user_name: 'github-actions[bot]'
-          user_email: 'github-actions[bot]@users.noreply.github.com'
+          echo "📊 Metrics files generated:"
+          ls -lh metrics*.txt 2>/dev/null || true
 
       - name: Upload benchmark artifacts
         if: always()
@@ -349,6 +139,5 @@ jobs:
           name: benchmark-results-${{ github.run_number }}
           path: |
             benchmark-results.json
-            metrics.txt
-            benchmark-dashboard/
+            metrics*.txt
             benchmark/build/outputs/connected_android_test_additional_output/
