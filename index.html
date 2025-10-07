@@ -11,7 +11,7 @@
             background-color: #f5f5f5; 
         }
         .container { 
-            max-width: 1000px; 
+            max-width: 1200px; 
             margin: 0 auto; 
             background: white;
             padding: 30px;
@@ -24,6 +24,13 @@
             margin-bottom: 30px;
             border-bottom: 2px solid #007acc;
             padding-bottom: 10px;
+        }
+        .info-box {
+            background: #f0f8ff;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            border-left: 4px solid #007acc;
         }
         .benchmark-item { 
             margin: 20px 0; 
@@ -39,13 +46,14 @@
             margin-bottom: 10px;
         }
         .benchmark-value { 
-            font-size: 32px; 
+            font-size: 24px; 
             font-weight: bold; 
             color: #007acc; 
         }
-        .benchmark-unit { 
-            color: #666; 
-            font-size: 20px;
+        .benchmark-allocations {
+            font-size: 16px;
+            color: #666;
+            margin-top: 5px;
         }
         .chart-container {
             margin-top: 40px;
@@ -64,43 +72,62 @@
 <body>
     <div class="container">
         <h1>📊 Performance Benchmarks Dashboard</h1>
+        <div class="info-box" id="metadata"></div>
         <div id="benchmarks"></div>
         <div class="chart-container">
-            <canvas id="chart" width="400" height="200"></canvas>
+            <h2>Execution Time</h2>
+            <canvas id="timeChart" width="400" height="200"></canvas>
+        </div>
+        <div class="chart-container">
+            <h2>Memory Allocations</h2>
+            <canvas id="allocChart" width="400" height="200"></canvas>
         </div>
         <div class="timestamp" id="timestamp"></div>
     </div>
     <script>
-        // Load benchmark data
         fetch('benchmark-results.json')
             .then(response => response.json())
             .then(data => {
-                const container = document.getElementById('benchmarks');
+                // Show metadata
+                const metadata = document.getElementById('metadata');
+                metadata.innerHTML = `
+                    <strong>Commit:</strong> ${data.gitCommit} | 
+                    <strong>Device:</strong> ${data.device} | 
+                    <strong>Brand:</strong> ${data.brand}
+                `;
 
-                if (data.length === 0) {
+                const container = document.getElementById('benchmarks');
+                const benchmarks = data.benchmarks || [];
+
+                if (benchmarks.length === 0) {
                     container.innerHTML = '<div class="benchmark-item">No benchmark results found</div>';
                     return;
                 }
 
-                data.forEach(benchmark => {
+                benchmarks.forEach(benchmark => {
                     const div = document.createElement('div');
                     div.className = 'benchmark-item';
+                    const timeMs = (benchmark.medianTimeNs / 1000000).toFixed(3);
                     div.innerHTML = `
-                        <div class="benchmark-name">${benchmark.name}</div>
-                        <div class="benchmark-value">${benchmark.value.toFixed(3)} <span class="benchmark-unit">${benchmark.unit}</span></div>
+                        <div class="benchmark-name">${benchmark.testName}</div>
+                        <div class="benchmark-value">${timeMs} ms</div>
+                        <div class="benchmark-allocations">
+                            Allocations: ${benchmark.medianAllocationCount} | 
+                            Iterations: ${benchmark.iterations}
+                        </div>
                     `;
                     container.appendChild(div);
                 });
 
-                // Create chart
-                const ctx = document.getElementById('chart').getContext('2d');
-                new Chart(ctx, {
+                // Time chart
+                const timeCtx = document.getElementById('timeChart').getContext('2d');
+                new Chart(timeCtx, {
                     type: 'bar',
                     data: {
-                        labels: data.map(b => b.name.replace(/.*\./, '')), // Remove class prefix
+                        labels: benchmarks.map(b => b.testName.replace(/.*\./, '')),
                         datasets: [{
-                            label: `Performance (${data[0]?.unit || 'μs'})`,
-                            data: data.map(b => b.value),
+                            label: 'Time (ms)',
+                            data: benchmarks.map(b => b.medianTimeNs / 1000000),
                             backgroundColor: 'rgba(0, 122, 204, 0.2)',
                             borderColor: 'rgba(0, 122, 204, 1)',
                             borderWidth: 2
@@ -111,29 +138,38 @@
                         scales: {
                             y: { 
                                 beginAtZero: true,
-                                title: {
-                                    display: true,
-                                    text: `Time (${data[0]?.unit || 'μs'})`
-                                }
-                            },
-                            x: {
-                                title: {
-                                    display: true,
-                                    text: 'Benchmark Tests'
-                                }
-                            }
-                        },
-                        plugins: {
-                            title: {
-                                display: true,
-                                text: 'Benchmark Performance Results'
+                                title: { display: true, text: 'Time (ms)' }
                             }
                         }
                     }
                 });
 
-                // Show timestamp
-                document.getElementById('timestamp').innerHTML = `Last updated: ${new Date().toLocaleString()}`;
+                // Allocation chart
+                const allocCtx = document.getElementById('allocChart').getContext('2d');
+                new Chart(allocCtx, {
+                    type: 'bar',
+                    data: {
+                        labels: benchmarks.map(b => b.testName.replace(/.*\./, '')),
+                        datasets: [{
+                            label: 'Allocations',
+                            data: benchmarks.map(b => b.medianAllocationCount),
+                            backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                            borderColor: 'rgba(255, 99, 132, 1)',
+                            borderWidth: 2
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        scales: {
+                            y: { 
+                                beginAtZero: true,
+                                title: { display: true, text: 'Allocations' }
+                            }
+                        }
+                    }
+                });
+
+                document.getElementById('timestamp').innerHTML = `Last updated: ${new Date(data.timestamp).toLocaleString()}`;
             })
             .catch(error => {
                 console.error('Error loading benchmark data:', error);
