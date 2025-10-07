@@ -29,21 +29,10 @@ def parse_benchmark_json(json_file):
         data = json.load(f)
 
     # Get metadata
-    timestamp = data.get('timestamp', '')
-    git_commit = data.get('gitCommit', 'unknown')
+    git_commit = data.get('gitCommit', 'unknown')[:7]  # Short commit
     device = data.get('device', 'unknown')
     brand = data.get('brand', 'unknown')
     branch = get_git_branch()
-
-    # Convert ISO timestamp to milliseconds
-    try:
-        if timestamp:
-            dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
-            timestamp_ms = int(dt.timestamp() * 1000)
-        else:
-            timestamp_ms = int(datetime.now().timestamp() * 1000)
-    except:
-        timestamp_ms = int(datetime.now().timestamp() * 1000)
 
     metrics = []
 
@@ -62,8 +51,13 @@ def parse_benchmark_json(json_file):
             class_name = 'unknown'
             method_name = test_name
 
+        # Escape quotes in labels
+        test_name_escaped = test_name.replace('"', '\\"')
+        class_name_escaped = class_name.replace('"', '\\"')
+        method_name_escaped = method_name.replace('"', '\\"')
+
         # Common labels for all metrics
-        labels = f'test="{test_name}",class="{class_name}",method="{method_name}",branch="{branch}",device="{device}",brand="{brand}",commit="{git_commit}"'
+        labels = f'test="{test_name_escaped}",class="{class_name_escaped}",method="{method_name_escaped}",branch="{branch}",device="{device}",brand="{brand}",commit="{git_commit}"'
 
         # Time metrics (in nanoseconds)
         min_time = benchmark.get('minTimeNs', 0)
@@ -71,9 +65,10 @@ def parse_benchmark_json(json_file):
         max_time = benchmark.get('maxTimeNs', 0)
 
         if median_time > 0:
-            metrics.append(f'android_benchmark_time_ns{{{labels},stat="min"}} {min_time} {timestamp_ms}')
-            metrics.append(f'android_benchmark_time_ns{{{labels},stat="median"}} {median_time} {timestamp_ms}')
-            metrics.append(f'android_benchmark_time_ns{{{labels},stat="max"}} {max_time} {timestamp_ms}')
+            # No timestamp - Prometheus will add it when scraping
+            metrics.append(f'android_benchmark_time_ns{{{labels},stat="min"}} {min_time}')
+            metrics.append(f'android_benchmark_time_ns{{{labels},stat="median"}} {median_time}')
+            metrics.append(f'android_benchmark_time_ns{{{labels},stat="max"}} {max_time}')
 
         # Allocation metrics
         min_alloc = benchmark.get('minAllocationCount', 0)
@@ -81,14 +76,14 @@ def parse_benchmark_json(json_file):
         max_alloc = benchmark.get('maxAllocationCount', 0)
 
         if median_alloc > 0:
-            metrics.append(f'android_benchmark_allocations{{{labels},stat="min"}} {min_alloc} {timestamp_ms}')
-            metrics.append(f'android_benchmark_allocations{{{labels},stat="median"}} {median_alloc} {timestamp_ms}')
-            metrics.append(f'android_benchmark_allocations{{{labels},stat="max"}} {max_alloc} {timestamp_ms}')
+            metrics.append(f'android_benchmark_allocations{{{labels},stat="min"}} {min_alloc}')
+            metrics.append(f'android_benchmark_allocations{{{labels},stat="median"}} {median_alloc}')
+            metrics.append(f'android_benchmark_allocations{{{labels},stat="max"}} {max_alloc}')
 
         # Iterations
         iterations = benchmark.get('iterations', 0)
         if iterations > 0:
-            metrics.append(f'android_benchmark_iterations{{{labels}}} {iterations} {timestamp_ms}')
+            metrics.append(f'android_benchmark_iterations{{{labels}}} {iterations}')
 
     return metrics
 
