@@ -117,19 +117,23 @@ tasks.register("generateBenchmarkReport") {
 
                                 println("    ⏱️  Time: min=$minTime, median=$medianTime, max=$maxTime")
 
-                                // Find allocationCount metrics
-                                val allocStart = content.indexOf(""""allocationCount"""", timeNsStart)
+                                // Find allocationCount metrics - search from benchmarkStart, not timeNsStart
+                                // because allocationCount is a sibling of timeNs in the metrics object
+                                val allocStart = content.indexOf(""""allocationCount"""", benchmarkStart)
                                 var minAlloc = 0.0
                                 var maxAlloc = 0.0
                                 var medianAlloc = 0.0
 
-                                if (allocStart != -1 && allocStart < timeNsStart + 2000) {
+                                // Make sure we find allocationCount within the same benchmark block (not the next one)
+                                if (allocStart != -1 && allocStart < benchmarkStart + 10000) {
                                     val allocSection = content.substring(allocStart, minOf(allocStart + 1000, content.length))
                                     minAlloc = """"minimum"\s*:\s*([\d.E+-]+)""".toRegex().find(allocSection)?.groupValues?.get(1)?.toDouble() ?: 0.0
                                     maxAlloc = """"maximum"\s*:\s*([\d.E+-]+)""".toRegex().find(allocSection)?.groupValues?.get(1)?.toDouble() ?: 0.0
                                     medianAlloc = """"median"\s*:\s*([\d.E+-]+)""".toRegex().find(allocSection)?.groupValues?.get(1)?.toDouble() ?: 0.0
 
                                     println("    💾 Allocations: min=$minAlloc, median=$medianAlloc, max=$maxAlloc")
+                                } else {
+                                    println("    ⚠️  No allocation data found for this test")
                                 }
 
                                 // Create result entry
