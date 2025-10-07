@@ -121,51 +121,22 @@ jobs:
             exit 1
           fi
           
-          echo "📈 Metrics to push:"
-          cat metrics.txt
+          echo "📈 Metrics generated:"
+          echo "- Prometheus format: metrics.txt ($(wc -l < metrics.txt) lines)"
+          echo "- InfluxDB format: metrics_influx.txt ($(wc -l < metrics_influx.txt) lines)"
           echo ""
           
-          # Push to Grafana Cloud Prometheus
-          echo "🚀 Pushing to Grafana Cloud..."
-          echo "Endpoint: $GRAFANA_URL"
-          echo "User: $GRAFANA_USER"
+          # Note about Grafana Cloud endpoint compatibility
+          echo "ℹ️  Note: Grafana Cloud's /api/prom/push endpoint requires Snappy compression"
+          echo "   which is not easily achievable with basic shell tools."
           echo ""
-          
-          # Try pushing with proper error handling
-          HTTP_CODE=$(curl -w "%{http_code}" -o response.txt \
-            --user "$GRAFANA_USER:$GRAFANA_TOKEN" \
-            -H "Content-Type: application/x-www-form-urlencoded" \
-            -X POST \
-            --data-binary @metrics.txt \
-            "$GRAFANA_URL" 2>&1 | tail -n1)
-          
-          echo "HTTP Response Code: $HTTP_CODE"
-          
-          if [ -f response.txt ]; then
-            echo "Response body:"
-            cat response.txt
-            echo ""
-          fi
-          
-          if [ "$HTTP_CODE" -eq 200 ] || [ "$HTTP_CODE" -eq 204 ] || [ "$HTTP_CODE" -eq 202 ]; then
-            echo "✅ Successfully pushed metrics to Grafana Cloud!"
-          else
-            echo "⚠️ Failed to push metrics. HTTP Code: $HTTP_CODE"
-            echo ""
-            echo "Debug information:"
-            echo "- Endpoint: $GRAFANA_URL"
-            echo "- Metrics count: $(wc -l < metrics.txt) lines"
-            echo "- First metric: $(head -n1 metrics.txt)"
-            echo ""
-            echo "Common issues:"
-            echo "1. Verify your Grafana Cloud credentials are correct"
-            echo "2. Check that the instance ID (user) matches your Grafana Cloud setup"
-            echo "3. Ensure the API token has write permissions for Prometheus"
-            echo "4. Try regenerating your API token in Grafana Cloud"
-            echo ""
-            echo "Note: Grafana push failed but workflow will continue..."
-            # Don't fail the workflow for Grafana push issues
-          fi
+          echo "📊 Recommended alternatives:"
+          echo "   1. Use GitHub Pages dashboard (already configured below)"
+          echo "   2. Use Grafana Alloy/Agent for proper remote write"
+          echo "   3. Set up a Prometheus Pushgateway"
+          echo ""
+          echo "⏭️  Skipping direct push to Grafana Cloud for now."
+          echo "   Your metrics are saved in artifacts and visible on GitHub Pages."
 
       - name: Create Benchmark Dashboard
         if: always() && github.ref == 'refs/heads/main'

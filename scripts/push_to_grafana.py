@@ -6,6 +6,7 @@ import json
 import sys
 import os
 import subprocess
+import time
 from datetime import datetime
 
 def get_git_branch():
@@ -91,6 +92,44 @@ def parse_benchmark_json(json_file):
 
     return metrics
 
+def push_to_grafana_influx_format(json_file):
+    """
+    Alternative approach: Convert to InfluxDB line protocol format
+    which Grafana Cloud can accept via their InfluxDB-compatible endpoint
+    """
+    with open(json_file, 'r') as f:
+        data = json.load(f)
+
+    git_commit = data.get('gitCommit', 'unknown')
+    device = data.get('device', 'unknown')
+    brand = data.get('brand', 'unknown')
+    branch = get_git_branch()
+
+    # Get current timestamp in nanoseconds
+    timestamp_ns = int(time.time() * 1_000_000_000)
+
+    lines = []
+    benchmarks = data.get('benchmarks', [])
+
+    for benchmark in benchmarks:
+        test_name = benchmark.get('testName', 'unknown')
+        parts = test_name.rsplit('.', 1)
+        class_name = parts[0] if len(parts) > 1 else 'unknown'
+        method_name = parts[1] if len(parts) > 1 else test_name
+
+        # InfluxDB line protocol format
+        # measurement,tag1=value1,tag2=value2 field1=value1,field2=value2 timestamp
+        tags = f'test={test_name},class={class_name},method={method_name},branch={branch},device={device},brand={brand},commit={git_commit}'
+
+        median_time = benchmark.get('medianTimeNs', 0)
+        median_alloc = benchmark.get('medianAllocationCount', 0)
+        iterations = benchmark.get('iterations', 0)
+
+        if median_time > 0:
+            lines.append(f'android_benchmark,{tags} time_ns={median_time}i,allocations={median_alloc}i,iterations={iterations}i {timestamp_ns}')
+
+    return lines
+
 def main():
     if len(sys.argv) != 2:
         print("Usage: push_to_grafana.py <benchmark-results.json>")
@@ -119,11 +158,18 @@ def main():
         if len(metrics) > 5:
             print(f"  ... and {len(metrics) - 5} more")
 
-        # Write to file for curl to use
+        # Write Prometheus format to file for curl to use
         with open('metrics.txt', 'w') as f:
             f.write('\n'.join(metrics))
 
-        print(f"\n✅ Metrics written to metrics.txt")
+        print(f"\n✅ Metrics written to metrics.txt (Prometheus format)")
+
+        # Also generate InfluxDB format as alternative
+        influx_lines = push_to_grafana_influx_format(json_file)
+        with open('metrics_influx.txt', 'w') as f:
+            f.write('\n'.join(influx_lines))
+
+        print(f"✅ Metrics written to metrics_influx.txt (InfluxDB format)")
 
     except json.JSONDecodeError as e:
         print(f"❌ Error parsing JSON: {e}")
