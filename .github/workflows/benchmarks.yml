@@ -103,6 +103,12 @@ jobs:
             exit 1
           fi
           
+          # Check if secrets are set
+          if [ -z "$GRAFANA_URL" ] || [ -z "$GRAFANA_USER" ] || [ -z "$GRAFANA_TOKEN" ]; then
+            echo "⚠️ Grafana secrets not configured. Skipping push."
+            exit 0
+          fi
+          
           # Make script executable
           chmod +x scripts/push_to_grafana.py
           
@@ -117,28 +123,48 @@ jobs:
           
           echo "📈 Metrics to push:"
           cat metrics.txt
+          echo ""
           
           # Push to Grafana Cloud Prometheus
-          echo ""
           echo "🚀 Pushing to Grafana Cloud..."
+          echo "Endpoint: $GRAFANA_URL"
+          echo "User: $GRAFANA_USER"
+          echo ""
           
+          # Try pushing with proper error handling
           HTTP_CODE=$(curl -w "%{http_code}" -o response.txt \
-            -u "$GRAFANA_USER:$GRAFANA_TOKEN" \
-            -H "Content-Type: text/plain" \
+            --user "$GRAFANA_USER:$GRAFANA_TOKEN" \
+            -H "Content-Type: application/x-www-form-urlencoded" \
             -X POST \
             --data-binary @metrics.txt \
-            "$GRAFANA_URL")
+            "$GRAFANA_URL" 2>&1 | tail -n1)
           
           echo "HTTP Response Code: $HTTP_CODE"
-          echo "Response:"
-          cat response.txt
-          echo ""
           
-          if [ "$HTTP_CODE" -eq 200 ] || [ "$HTTP_CODE" -eq 204 ]; then
+          if [ -f response.txt ]; then
+            echo "Response body:"
+            cat response.txt
+            echo ""
+          fi
+          
+          if [ "$HTTP_CODE" -eq 200 ] || [ "$HTTP_CODE" -eq 204 ] || [ "$HTTP_CODE" -eq 202 ]; then
             echo "✅ Successfully pushed metrics to Grafana Cloud!"
           else
-            echo "❌ Failed to push metrics. HTTP Code: $HTTP_CODE"
-            exit 1
+            echo "⚠️ Failed to push metrics. HTTP Code: $HTTP_CODE"
+            echo ""
+            echo "Debug information:"
+            echo "- Endpoint: $GRAFANA_URL"
+            echo "- Metrics count: $(wc -l < metrics.txt) lines"
+            echo "- First metric: $(head -n1 metrics.txt)"
+            echo ""
+            echo "Common issues:"
+            echo "1. Verify your Grafana Cloud credentials are correct"
+            echo "2. Check that the instance ID (user) matches your Grafana Cloud setup"
+            echo "3. Ensure the API token has write permissions for Prometheus"
+            echo "4. Try regenerating your API token in Grafana Cloud"
+            echo ""
+            echo "Note: Grafana push failed but workflow will continue..."
+            # Don't fail the workflow for Grafana push issues
           fi
 
       - name: Create Benchmark Dashboard
