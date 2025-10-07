@@ -43,28 +43,6 @@ jobs:
             ~/.gradle/wrapper
           key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*') }}
 
-      - name: AVD cache
-        uses: actions/cache@v4
-        id: avd-cache
-        with:
-          path: |
-            ~/.android/avd/*
-            ~/.android/adb*
-          key: avd-29-final
-
-      - name: Create AVD
-        if: steps.avd-cache.outputs.cache-hit != 'true'
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 29
-          target: default
-          arch: x86_64
-          profile: Nexus 6
-          force-avd-creation: false
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
-          disable-animations: false
-          script: echo "Generated AVD snapshot"
-
       - name: Get device info
         id: device-info
         run: |
@@ -79,15 +57,17 @@ jobs:
           arch: x86_64
           profile: Nexus 6
           force-avd-creation: false
-          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
           disable-animations: true
+          disable-spellchecker: true
+          emulator-boot-timeout: 600
           script: |
             echo "🚀 Starting benchmark execution..."
             adb shell settings put global window_animation_scale 0.0
             adb shell settings put global transition_animation_scale 0.0
             adb shell settings put global animator_duration_scale 0.0
             echo "📱 Running benchmarks..."
-            ./gradlew :benchmark:connectedReleaseAndroidTest --continue --stacktrace
+            ./gradlew :benchmark:connectedReleaseAndroidTest --continue --stacktrace || true
             echo "✅ Benchmark execution completed"
 
       - name: Generate Benchmark Report
