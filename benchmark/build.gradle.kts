@@ -31,6 +31,7 @@ android {
         }
         release {
             isDefault = true
+            isMinifyEnabled = false
         }
     }
 
