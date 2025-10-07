@@ -14,6 +14,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch all history for git commands
 
       - name: Setup JDK 17
         uses: actions/setup-java@v4
@@ -63,6 +65,12 @@ jobs:
           disable-animations: false
           script: echo "Generated AVD snapshot"
 
+      - name: Get device info
+        id: device-info
+        run: |
+          echo "DEVICE_MODEL=Nexus_6_API_29" >> $GITHUB_ENV
+          echo "DEVICE_BRAND=generic" >> $GITHUB_ENV
+
       - name: Run Benchmarks
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -94,6 +102,65 @@ jobs:
           echo "📊 Benchmark Results:"
           cat benchmark-results.json 2>/dev/null || echo "No results file found"
 
+      - name: Setup Python
+        if: always() && github.ref == 'refs/heads/main'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Push to Grafana Cloud
+        if: always() && github.ref == 'refs/heads/main'
+        env:
+          GRAFANA_URL: ${{ secrets.GRAFANA_PROMETHEUS_URL }}
+          GRAFANA_USER: ${{ secrets.GRAFANA_PROMETHEUS_USER }}
+          GRAFANA_TOKEN: ${{ secrets.GRAFANA_PROMETHEUS_TOKEN }}
+        run: |
+          echo "📊 Pushing benchmark results to Grafana Cloud..."
+          
+          # Check if benchmark results exist
+          if [ ! -f "benchmark-results.json" ]; then
+            echo "❌ benchmark-results.json not found"
+            exit 1
+          fi
+          
+          # Make script executable
+          chmod +x scripts/push_to_grafana.py
+          
+          # Parse benchmark results and generate metrics
+          python3 scripts/push_to_grafana.py benchmark-results.json
+          
+          # Check if metrics were generated
+          if [ ! -f "metrics.txt" ]; then
+            echo "❌ metrics.txt not generated"
+            exit 1
+          fi
+          
+          echo "📈 Metrics to push:"
+          cat metrics.txt
+          
+          # Push to Grafana Cloud Prometheus
+          echo ""
+          echo "🚀 Pushing to Grafana Cloud..."
+          
+          HTTP_CODE=$(curl -w "%{http_code}" -o response.txt \
+            -u "$GRAFANA_USER:$GRAFANA_TOKEN" \
+            -H "Content-Type: text/plain" \
+            -X POST \
+            --data-binary @metrics.txt \
+            "$GRAFANA_URL")
+          
+          echo "HTTP Response Code: $HTTP_CODE"
+          echo "Response:"
+          cat response.txt
+          echo ""
+          
+          if [ "$HTTP_CODE" -eq 200 ] || [ "$HTTP_CODE" -eq 204 ]; then
+            echo "✅ Successfully pushed metrics to Grafana Cloud!"
+          else
+            echo "❌ Failed to push metrics. HTTP Code: $HTTP_CODE"
+            exit 1
+          fi
+
       - name: Create Benchmark Dashboard
         if: always() && github.ref == 'refs/heads/main'
         run: |
@@ -113,7 +180,7 @@ jobs:
                       background-color: #f5f5f5; 
                   }
                   .container { 
-                      max-width: 1000px; 
+                      max-width: 1200px; 
                       margin: 0 auto; 
                       background: white;
                       padding: 30px;
@@ -126,6 +193,13 @@ jobs:
                       margin-bottom: 30px;
                       border-bottom: 2px solid #007acc;
                       padding-bottom: 10px;
+                  }
+                  .info-box {
+                      background: #f0f8ff;
+                      padding: 15px;
+                      border-radius: 5px;
+                      margin-bottom: 20px;
+                      border-left: 4px solid #007acc;
                   }
                   .benchmark-item { 
                       margin: 20px 0; 
@@ -141,13 +215,14 @@ jobs:
                       margin-bottom: 10px;
                   }
                   .benchmark-value { 
-                      font-size: 32px; 
+                      font-size: 24px; 
                       font-weight: bold; 
                       color: #007acc; 
                   }
-                  .benchmark-unit { 
-                      color: #666; 
-                      font-size: 20px;
+                  .benchmark-allocations {
+                      font-size: 16px;
+                      color: #666;
+                      margin-top: 5px;
                   }
                   .chart-container {
                       margin-top: 40px;
@@ -166,43 +241,62 @@ jobs:
           <body>
               <div class="container">
                   <h1>📊 Performance Benchmarks Dashboard</h1>
+                  <div class="info-box" id="metadata"></div>
                   <div id="benchmarks"></div>
                   <div class="chart-container">
-                      <canvas id="chart" width="400" height="200"></canvas>
+                      <h2>Execution Time</h2>
+                      <canvas id="timeChart" width="400" height="200"></canvas>
+                  </div>
+                  <div class="chart-container">
+                      <h2>Memory Allocations</h2>
+                      <canvas id="allocChart" width="400" height="200"></canvas>
                   </div>
                   <div class="timestamp" id="timestamp"></div>
               </div>
               <script>
-                  // Load benchmark data
                   fetch('benchmark-results.json')
                       .then(response => response.json())
                       .then(data => {
+                          // Show metadata
+                          const metadata = document.getElementById('metadata');
+                          metadata.innerHTML = `
+                              <strong>Commit:</strong> ${data.gitCommit} | 
+                              <strong>Device:</strong> ${data.device} | 
+                              <strong>Brand:</strong> ${data.brand}
+                          `;
+
                           const container = document.getElementById('benchmarks');
+                          const benchmarks = data.benchmarks || [];
           
-                          if (data.length === 0) {
+                          if (benchmarks.length === 0) {
                               container.innerHTML = '<div class="benchmark-item">No benchmark results found</div>';
                               return;
                           }
           
-                          data.forEach(benchmark => {
+                          benchmarks.forEach(benchmark => {
                               const div = document.createElement('div');
                               div.className = 'benchmark-item';
+                              const timeMs = (benchmark.medianTimeNs / 1000000).toFixed(3);
                               div.innerHTML = `
-                                  <div class="benchmark-name">${benchmark.name}</div>
-                                  <div class="benchmark-value">${benchmark.value.toFixed(3)} <span class="benchmark-unit">${benchmark.unit}</span></div>
+                                  <div class="benchmark-name">${benchmark.testName}</div>
+                                  <div class="benchmark-value">${timeMs} ms</div>
+                                  <div class="benchmark-allocations">
+                                      Allocations: ${benchmark.medianAllocationCount} | 
+                                      Iterations: ${benchmark.iterations}
+                                  </div>
                               `;
                               container.appendChild(div);
                           });
           
-                          // Create chart
-                          const ctx = document.getElementById('chart').getContext('2d');
-                          new Chart(ctx, {
+                          // Time chart
+                          const timeCtx = document.getElementById('timeChart').getContext('2d');
+                          new Chart(timeCtx, {
                               type: 'bar',
                               data: {
-                                  labels: data.map(b => b.name.replace(/.*\./, '')), // Remove class prefix
+                                  labels: benchmarks.map(b => b.testName.replace(/.*\./, '')),
                                   datasets: [{
-                                      label: `Performance (${data[0]?.unit || 'μs'})`,
-                                      data: data.map(b => b.value),
+                                      label: 'Time (ms)',
+                                      data: benchmarks.map(b => b.medianTimeNs / 1000000),
                                       backgroundColor: 'rgba(0, 122, 204, 0.2)',
                                       borderColor: 'rgba(0, 122, 204, 1)',
                                       borderWidth: 2
@@ -213,29 +307,38 @@ jobs:
                                   scales: {
                                       y: { 
                                           beginAtZero: true,
-                                          title: {
-                                              display: true,
-                                              text: `Time (${data[0]?.unit || 'μs'})`
-                                          }
-                                      },
-                                      x: {
-                                          title: {
-                                              display: true,
-                                              text: 'Benchmark Tests'
-                                          }
+                                          title: { display: true, text: 'Time (ms)' }
                                       }
-                                  },
-                                  plugins: {
-                                      title: {
-                                          display: true,
-                                          text: 'Benchmark Performance Results'
+                                  }
+                              }
+                          });
+
+                          // Allocation chart
+                          const allocCtx = document.getElementById('allocChart').getContext('2d');
+                          new Chart(allocCtx, {
+                              type: 'bar',
+                              data: {
+                                  labels: benchmarks.map(b => b.testName.replace(/.*\./, '')),
+                                  datasets: [{
+                                      label: 'Allocations',
+                                      data: benchmarks.map(b => b.medianAllocationCount),
+                                      backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                                      borderColor: 'rgba(255, 99, 132, 1)',
+                                      borderWidth: 2
+                                  }]
+                              },
+                              options: {
+                                  responsive: true,
+                                  scales: {
+                                      y: { 
+                                          beginAtZero: true,
+                                          title: { display: true, text: 'Allocations' }
                                       }
                                   }
                               }
                           });
           
-                          // Show timestamp
-                          document.getElementById('timestamp').innerHTML = `Last updated: ${new Date().toLocaleString()}`;
+                          document.getElementById('timestamp').innerHTML = `Last updated: ${new Date(data.timestamp).toLocaleString()}`;
                       })
                       .catch(error => {
                           console.error('Error loading benchmark data:', error);
@@ -269,5 +372,6 @@ jobs:
           name: benchmark-results-${{ github.run_number }}
           path: |
             benchmark-results.json
+            metrics.txt
             benchmark-dashboard/
             benchmark/build/outputs/connected_android_test_additional_output/
