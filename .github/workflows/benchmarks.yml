@@ -70,17 +70,11 @@ jobs:
             ./gradlew :benchmark:connectedReleaseAndroidTest --continue --stacktrace || true
             echo "✅ Benchmark execution completed"
 
-      - name: Generate Benchmark Report
-        if: always()
-        run: |
-          echo "📊 Generating benchmark report..."
-          ./gradlew :benchmark:generateBenchmarkReport --stacktrace
-
       - name: Display Results
         if: always()
         run: |
-          echo "📊 Benchmark Results:"
-          cat benchmark-results.json 2>/dev/null || echo "No results file found"
+          echo "📊 Benchmark output files:"
+          find benchmark/build/outputs/connected_android_test_additional_output -name "*benchmarkData*.json" -type f || echo "No benchmark files found"
 
       - name: Setup Python
         if: always() && github.ref == 'refs/heads/main'
@@ -112,9 +106,10 @@ jobs:
         run: |
           echo "📊 Pushing benchmark results to Grafana Cloud..."
           
-          # Check if benchmark results exist
-          if [ ! -f "benchmark-results.json" ]; then
-            echo "❌ benchmark-results.json not found"
+          # Check if benchmark output directory exists
+          BENCHMARK_OUTPUT_DIR="benchmark/build/outputs/connected_android_test_additional_output"
+          if [ ! -d "$BENCHMARK_OUTPUT_DIR" ]; then
+            echo "❌ Benchmark output directory not found: $BENCHMARK_OUTPUT_DIR"
             exit 1
           fi
           
@@ -124,11 +119,17 @@ jobs:
             exit 0
           fi
           
-          # Generate metrics in Prometheus format
-          echo "📈 Generating metrics..."
+          # Generate metrics in Prometheus format directly from raw benchmark output
+          echo "📈 Generating metrics from raw benchmark output..."
           chmod +x scripts/push_to_grafana.py
           chmod +x scripts/metrics_server.py
-          python3 scripts/push_to_grafana.py benchmark-results.json
+          python3 scripts/push_to_grafana.py "$BENCHMARK_OUTPUT_DIR"
+          
+          # Verify metrics files were created
+          if [ ! -f "metrics.txt" ] || [ ! -f "metrics_influx.txt" ]; then
+            echo "❌ Metrics files not generated"
+            exit 1
+          fi
           
           echo ""
           echo "🚀 Starting metrics server for Alloy to scrape..."
@@ -273,6 +274,5 @@ jobs:
         with:
           name: benchmark-results-${{ github.run_number }}
           path: |
-            benchmark-results.json
             metrics*.txt
             benchmark/build/outputs/connected_android_test_additional_output/
