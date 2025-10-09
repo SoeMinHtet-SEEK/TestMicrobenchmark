@@ -14,8 +14,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # Fetch all history for git commands
 
       - name: Setup JDK 17
         uses: actions/setup-java@v4
@@ -43,13 +41,8 @@ jobs:
             ~/.gradle/wrapper
           key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*') }}
 
-      - name: Get device info
-        id: device-info
-        run: |
-          echo "DEVICE_MODEL=Nexus_6_API_29" >> $GITHUB_ENV
-          echo "DEVICE_BRAND=generic" >> $GITHUB_ENV
-
       - name: Run Benchmarks
+        id: run-benchmarks
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 29
@@ -62,91 +55,65 @@ jobs:
           disable-spellchecker: true
           emulator-boot-timeout: 600
           script: |
-            echo "🚀 Starting benchmark execution..."
             adb shell settings put global window_animation_scale 0.0
             adb shell settings put global transition_animation_scale 0.0
             adb shell settings put global animator_duration_scale 0.0
-            echo "📱 Running benchmarks..."
-            ./gradlew :benchmark:connectedReleaseAndroidTest --continue --stacktrace || true
-            echo "✅ Benchmark execution completed"
+            ./gradlew :benchmark:connectedReleaseAndroidTest --continue --stacktrace
 
       - name: Setup Python
-        if: always() && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+        if: success() && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
         uses: actions/setup-python@v5
         with:
           python-version: '3.x'
 
       - name: Install Grafana Alloy
-        if: always() && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+        if: success() && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
         run: |
-          echo "📦 Installing Grafana Alloy (official remote write tool)..."
-          
-          # Add Grafana APT repository
           sudo mkdir -p /etc/apt/keyrings/
           wget -q -O - https://apt.grafana.com/gpg.key | gpg --dearmor | sudo tee /etc/apt/keyrings/grafana.gpg > /dev/null
           echo "deb [signed-by=/etc/apt/keyrings/grafana.gpg] https://apt.grafana.com stable main" | sudo tee /etc/apt/sources.list.d/grafana.list
-          
           sudo apt-get update
           sudo apt-get install -y alloy
-          
-          echo "✅ Alloy installed: $(alloy --version)"
+          alloy --version
 
       - name: Push to Grafana Cloud
-        if: always() && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+        if: success() && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
         env:
           GRAFANA_URL: ${{ secrets.GRAFANA_PROMETHEUS_URL }}
           GRAFANA_USER: ${{ secrets.GRAFANA_PROMETHEUS_USER }}
           GRAFANA_TOKEN: ${{ secrets.GRAFANA_PROMETHEUS_TOKEN }}
         run: |
-          echo "📊 Pushing benchmark results to Grafana Cloud..."
-          
-          # Check if benchmark output directory exists
           BENCHMARK_OUTPUT_DIR="benchmark/build/outputs/connected_android_test_additional_output"
+          
           if [ ! -d "$BENCHMARK_OUTPUT_DIR" ]; then
-            echo "❌ Benchmark output directory not found: $BENCHMARK_OUTPUT_DIR"
+            echo "Benchmark output directory not found: $BENCHMARK_OUTPUT_DIR"
             exit 1
           fi
           
-          # Check if secrets are set
           if [ -z "$GRAFANA_URL" ] || [ -z "$GRAFANA_USER" ] || [ -z "$GRAFANA_TOKEN" ]; then
-            echo "⚠️ Grafana secrets not configured. Skipping push."
+            echo "Grafana secrets not configured. Skipping push."
             exit 0
           fi
           
-          # Generate metrics and pipe directly to metrics server (no intermediate file)
-          echo "📈 Generating metrics and starting server..."
-          chmod +x scripts/benchmark_to_prometheus.py
-          chmod +x scripts/prometheus_server.py
+          chmod +x scripts/benchmark_to_prometheus.py scripts/prometheus_server.py
           
-          # Pipe metrics directly from generator to server
           python3 scripts/benchmark_to_prometheus.py "$BENCHMARK_OUTPUT_DIR" | python3 scripts/prometheus_server.py 9091 > metrics_server.log 2>&1 &
           METRICS_SERVER_PID=$!
           
-          # Wait for server to start
-          sleep 3
+          sleep 2
           
-          # Verify server is running
           if ! kill -0 $METRICS_SERVER_PID 2>/dev/null; then
-            echo "❌ Metrics server failed to start"
+            echo "Metrics server failed to start"
             cat metrics_server.log
             exit 1
           fi
           
-          # Test the metrics endpoint
-          echo "🔍 Testing metrics endpoint..."
-          if curl -s http://127.0.0.1:9091/metrics | head -n 3; then
-            echo "✅ Metrics endpoint is responding"
-          else
-            echo "❌ Metrics endpoint not responding"
+          if ! curl -s http://127.0.0.1:9091/metrics | head -n 3; then
+            echo "Metrics endpoint not responding"
             exit 1
           fi
           
-          echo ""
-          echo "🚀 Setting up Alloy to push metrics..."
-          
-          # Create Alloy configuration that scrapes our local endpoint
           cat > alloy-config.alloy << 'EOF'
-          // Scrape metrics from local endpoint
           prometheus.scrape "benchmark_scraper" {
             targets = [{
               __address__ = "127.0.0.1:9091",
@@ -159,7 +126,6 @@ jobs:
             forward_to = [prometheus.remote_write.grafana_cloud.receiver]
           }
           
-          // Configure remote write to Grafana Cloud
           prometheus.remote_write "grafana_cloud" {
             endpoint {
               url = env("GRAFANA_URL")
@@ -179,79 +145,21 @@ jobs:
           }
           EOF
           
-          echo "✅ Alloy configuration created"
-          
-          # Start Alloy in background
-          echo "🚀 Starting Alloy..."
           alloy run alloy-config.alloy > alloy.log 2>&1 &
           ALLOY_PID=$!
           
-          # Wait for Alloy to start and scrape
-          echo "⏳ Waiting for Alloy to scrape and push metrics..."
-          sleep 15
+          sleep 20
           
-          # Check if Alloy is still running
           if ! kill -0 $ALLOY_PID 2>/dev/null; then
-            echo "❌ Alloy stopped unexpectedly. Check logs:"
+            echo "Alloy stopped unexpectedly:"
             cat alloy.log
             exit 1
           fi
           
-          echo "✅ Alloy is running (PID: $ALLOY_PID)"
+          echo "Alloy log output:"
+          tail -n 30 alloy.log
           
-          # Check Alloy logs for scrape activity
-          echo ""
-          echo "📋 Checking Alloy scrape activity..."
-          if grep -i "scrape" alloy.log | tail -n 5; then
-            echo "✅ Alloy is scraping metrics"
-          else
-            echo "⚠️  No scrape activity detected yet"
-          fi
-          
-          # Give more time for remote write to complete
-          echo ""
-          echo "⏳ Allowing time for metrics to be sent to Grafana Cloud..."
-          sleep 10
-          
-          # Check for errors
-          echo ""
-          echo "📋 Checking for errors in Alloy logs..."
-          if grep -i "error\|failed\|unable" alloy.log | grep -v "failed to start reporter"; then
-            echo "⚠️  Some errors detected (may be non-critical)"
-          else
-            echo "✅ No critical errors detected"
-          fi
-          
-          # Check for successful remote writes
-          echo ""
-          echo "📋 Checking for successful remote writes..."
-          if grep -i "succeeded\|sent\|samples" alloy.log | tail -n 5; then
-            echo "✅ Found remote write activity"
-          else
-            echo "⚠️  No clear confirmation of successful push"
-          fi
-          
-          # Stop services
-          echo ""
-          echo "🛑 Stopping services..."
-          kill $ALLOY_PID 2>/dev/null || true
-          kill $METRICS_SERVER_PID 2>/dev/null || true
-          sleep 2
-          
-          # Show final summary
-          echo ""
-          echo "📊 Final Alloy log summary:"
-          echo "=========================="
-          tail -n 40 alloy.log
-          
-          echo ""
-          echo "✅ Metrics push process completed!"
-          echo ""
-          echo "📊 To verify metrics arrived in Grafana Cloud:"
-          echo "   1. Go to your Grafana Cloud instance"
-          echo "   2. Click 'Explore' → Select Prometheus data source"
-          echo "   3. Query: {__name__=~\"android_benchmark.*\"}"
-          echo "   4. If you see data → Success! If not, check logs above."
+          kill $ALLOY_PID $METRICS_SERVER_PID 2>/dev/null || true
 
       - name: Upload benchmark artifacts
         if: always()
@@ -259,5 +167,6 @@ jobs:
         with:
           name: benchmark-results-${{ github.run_number }}
           path: |
-            metrics*.txt
             benchmark/build/outputs/connected_android_test_additional_output/
+            alloy.log
+            metrics_server.log
