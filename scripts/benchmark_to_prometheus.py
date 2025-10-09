@@ -130,8 +130,8 @@ def generate_prometheus_metrics(benchmark_results, git_commit, branch):
 
 def main():
     if len(sys.argv) != 2:
-        print("Usage: push_to_grafana.py <benchmark-output-directory>", file=sys.stderr)
-        print("Example: push_to_grafana.py benchmark/build/outputs/connected_android_test_additional_output", file=sys.stderr)
+        print("Usage: benchmark_to_prometheus.py <benchmark-output-directory>", file=sys.stderr)
+        print("Example: benchmark_to_prometheus.py benchmark/build/outputs/connected_android_test_additional_output", file=sys.stderr)
         sys.exit(1)
 
     output_dir = sys.argv[1]

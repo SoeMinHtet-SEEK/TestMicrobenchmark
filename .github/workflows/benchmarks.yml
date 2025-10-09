@@ -115,11 +115,11 @@ jobs:
           
           # Generate metrics and pipe directly to metrics server (no intermediate file)
           echo "📈 Generating metrics and starting server..."
-          chmod +x scripts/push_to_grafana.py
-          chmod +x scripts/metrics_server.py
+          chmod +x scripts/benchmark_to_prometheus.py
+          chmod +x scripts/prometheus_server.py
           
           # Pipe metrics directly from generator to server
-          python3 scripts/push_to_grafana.py "$BENCHMARK_OUTPUT_DIR" | python3 scripts/metrics_server.py 9091 > metrics_server.log 2>&1 &
+          python3 scripts/benchmark_to_prometheus.py "$BENCHMARK_OUTPUT_DIR" | python3 scripts/prometheus_server.py 9091 > metrics_server.log 2>&1 &
           METRICS_SERVER_PID=$!
           
           # Wait for server to start
