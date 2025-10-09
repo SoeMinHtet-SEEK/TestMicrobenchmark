@@ -77,13 +77,13 @@ jobs:
           find benchmark/build/outputs/connected_android_test_additional_output -name "*benchmarkData*.json" -type f || echo "No benchmark files found"
 
       - name: Setup Python
-        if: always() && github.ref == 'refs/heads/main'
+        if: always() && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
         uses: actions/setup-python@v5
         with:
           python-version: '3.x'
 
       - name: Install Grafana Alloy
-        if: always() && github.ref == 'refs/heads/main'
+        if: always() && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
         run: |
           echo "📦 Installing Grafana Alloy (official remote write tool)..."
           
@@ -98,7 +98,7 @@ jobs:
           echo "✅ Alloy installed: $(alloy --version)"
 
       - name: Push to Grafana Cloud
-        if: always() && github.ref == 'refs/heads/main'
+        if: always() && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
         env:
           GRAFANA_URL: ${{ secrets.GRAFANA_PROMETHEUS_URL }}
           GRAFANA_USER: ${{ secrets.GRAFANA_PROMETHEUS_USER }}
