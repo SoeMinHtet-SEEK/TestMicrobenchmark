@@ -7,7 +7,6 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 
 def create_metrics_handler(metrics_content):
-    """Factory function that creates a handler class with metrics in closure"""
     class MetricsHandler(BaseHTTPRequestHandler):
         def do_GET(self):
             if self.path == '/metrics':
@@ -25,20 +24,15 @@ def create_metrics_handler(metrics_content):
                 self.end_headers()
 
         def log_message(self, format, *args):
-            # Suppress default logging
             pass
 
     return MetricsHandler
 
 def start_server(port=9091, metrics_content=""):
-    """Start the metrics server"""
-    # Create a handler class with metrics in its closure
     handler_class = create_metrics_handler(metrics_content)
-
     server = HTTPServer(('127.0.0.1', port), handler_class)
-    print(f"✅ Metrics server started on http://127.0.0.1:{port}/metrics")
+    print(f"Metrics server started on http://127.0.0.1:{port}/metrics")
 
-    # Run server in a thread
     thread = threading.Thread(target=server.serve_forever)
     thread.daemon = True
     thread.start()
@@ -46,27 +40,22 @@ def start_server(port=9091, metrics_content=""):
     return server
 
 if __name__ == '__main__':
-    # When run standalone, read from stdin or a file
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 9091
 
-    # Read metrics from stdin
-    print("📊 Reading metrics from stdin...")
     metrics = sys.stdin.read()
 
     if not metrics:
-        print("❌ No metrics provided")
+        print("No metrics provided")
         sys.exit(1)
 
     server = start_server(port, metrics)
 
-    print(f"📊 Serving metrics at http://127.0.0.1:{port}/metrics")
-    print("   Press Ctrl+C to stop")
+    print("Press Ctrl+C to stop")
 
     try:
-        # Keep the main thread alive
         while True:
             import time
             time.sleep(1)
     except KeyboardInterrupt:
-        print("\n🛑 Stopping server...")
+        print("\nStopping server...")
         server.shutdown()
