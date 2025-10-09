@@ -2,24 +2,21 @@
 """
 Start a simple HTTP server that exposes Prometheus metrics for Alloy to scrape
 """
-import os
 import sys
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
-import time
+
+# Global variable to store metrics in memory
+METRICS_DATA = ""
 
 class MetricsHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == '/metrics':
-            # Read the metrics file
             try:
-                with open('metrics.txt', 'r') as f:
-                    metrics = f.read()
-
                 self.send_response(200)
                 self.send_header('Content-Type', 'text/plain; version=0.0.4')
                 self.end_headers()
-                self.wfile.write(metrics.encode('utf-8'))
+                self.wfile.write(METRICS_DATA.encode('utf-8'))
             except Exception as e:
                 self.send_response(500)
                 self.end_headers()
@@ -32,8 +29,16 @@ class MetricsHandler(BaseHTTPRequestHandler):
         # Suppress default logging
         pass
 
-def start_server(port=9091):
+def set_metrics(metrics_content):
+    """Set the metrics content to serve"""
+    global METRICS_DATA
+    METRICS_DATA = metrics_content
+
+def start_server(port=9091, metrics_content=""):
     """Start the metrics server"""
+    global METRICS_DATA
+    METRICS_DATA = metrics_content
+
     server = HTTPServer(('127.0.0.1', port), MetricsHandler)
     print(f"✅ Metrics server started on http://127.0.0.1:{port}/metrics")
 
@@ -45,13 +50,18 @@ def start_server(port=9091):
     return server
 
 if __name__ == '__main__':
+    # When run standalone, read from stdin or a file
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 9091
 
-    if not os.path.exists('metrics.txt'):
-        print("❌ metrics.txt not found")
+    # Read metrics from stdin
+    print("📊 Reading metrics from stdin...")
+    metrics = sys.stdin.read()
+
+    if not metrics:
+        print("❌ No metrics provided")
         sys.exit(1)
 
-    server = start_server(port)
+    server = start_server(port, metrics)
 
     print(f"📊 Serving metrics at http://127.0.0.1:{port}/metrics")
     print("   Press Ctrl+C to stop")
@@ -59,8 +69,8 @@ if __name__ == '__main__':
     try:
         # Keep the main thread alive
         while True:
+            import time
             time.sleep(1)
     except KeyboardInterrupt:
         print("\n🛑 Stopping server...")
         server.shutdown()
-

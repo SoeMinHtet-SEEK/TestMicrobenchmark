@@ -154,16 +154,16 @@ def main():
 
     output_dir = sys.argv[1]
 
-    print(f"🔍 Looking for benchmark results in: {output_dir}")
+    print(f"🔍 Looking for benchmark results in: {output_dir}", file=sys.stderr)
 
     # Find all benchmark JSON files
     benchmark_files = find_benchmark_files(output_dir)
 
     if not benchmark_files:
-        print("⚠️  No benchmark files found")
+        print("⚠️  No benchmark files found", file=sys.stderr)
         sys.exit(0)
 
-    print(f"📄 Found {len(benchmark_files)} benchmark file(s)")
+    print(f"📄 Found {len(benchmark_files)} benchmark file(s)", file=sys.stderr)
 
     # Get metadata
     git_commit = get_git_commit()
@@ -172,40 +172,39 @@ def main():
     # Parse all benchmark files
     all_results = []
     for json_file in benchmark_files:
-        print(f"  📄 Processing: {json_file.name}")
+        print(f"  📄 Processing: {json_file.name}", file=sys.stderr)
         try:
             results = parse_raw_benchmark_json(json_file)
             all_results.extend(results)
-            print(f"    ✅ Extracted {len(results)} benchmark(s)")
+            print(f"    ✅ Extracted {len(results)} benchmark(s)", file=sys.stderr)
         except Exception as e:
-            print(f"    ⚠️  Error processing {json_file.name}: {e}")
+            print(f"    ⚠️  Error processing {json_file.name}: {e}", file=sys.stderr)
             import traceback
-            traceback.print_exc()
+            traceback.print_exc(file=sys.stderr)
 
     if not all_results:
-        print("⚠️  No benchmark results extracted")
+        print("⚠️  No benchmark results extracted", file=sys.stderr)
         sys.exit(0)
 
-    print(f"\n📊 Total benchmarks extracted: {len(all_results)}")
+    print(f"\n📊 Total benchmarks extracted: {len(all_results)}", file=sys.stderr)
 
     # Generate Prometheus format metrics
-    print(f"\n📈 Generating Prometheus metrics...")
+    print(f"\n📈 Generating Prometheus metrics...", file=sys.stderr)
     prometheus_metrics = generate_prometheus_metrics(all_results, git_commit, branch)
 
-    with open('metrics.txt', 'w') as f:
-        f.write('\n'.join(prometheus_metrics))
+    print(f"✅ Generated {len(prometheus_metrics)} metrics", file=sys.stderr)
 
-    print(f"✅ Wrote {len(prometheus_metrics)} metrics to metrics.txt")
-
-
-    # Display sample metrics
-    print("\n📊 Sample Prometheus metrics:")
+    # Display sample metrics to stderr
+    print("\n📊 Sample Prometheus metrics:", file=sys.stderr)
     for metric in prometheus_metrics[:5]:
-        print(f"  {metric}")
+        print(f"  {metric}", file=sys.stderr)
     if len(prometheus_metrics) > 5:
-        print(f"  ... and {len(prometheus_metrics) - 5} more")
+        print(f"  ... and {len(prometheus_metrics) - 5} more", file=sys.stderr)
 
-    print("\n✅ Metrics generation complete!")
+    print("\n✅ Metrics generation complete!", file=sys.stderr)
+
+    # Output metrics to stdout for piping
+    print('\n'.join(prometheus_metrics))
 
 if __name__ == "__main__":
     main()

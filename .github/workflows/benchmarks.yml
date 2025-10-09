@@ -119,23 +119,13 @@ jobs:
             exit 0
           fi
           
-          # Generate metrics in Prometheus format directly from raw benchmark output
-          echo "📈 Generating metrics from raw benchmark output..."
+          # Generate metrics and pipe directly to metrics server (no intermediate file)
+          echo "📈 Generating metrics and starting server..."
           chmod +x scripts/push_to_grafana.py
           chmod +x scripts/metrics_server.py
-          python3 scripts/push_to_grafana.py "$BENCHMARK_OUTPUT_DIR"
           
-          # Verify metrics file was created
-          if [ ! -f "metrics.txt" ]; then
-            echo "❌ Metrics file not generated"
-            exit 1
-          fi
-          
-          echo ""
-          echo "🚀 Starting metrics server for Alloy to scrape..."
-          
-          # Start a simple HTTP server to serve metrics
-          python3 scripts/metrics_server.py 9091 > metrics_server.log 2>&1 &
+          # Pipe metrics directly from generator to server
+          python3 scripts/push_to_grafana.py "$BENCHMARK_OUTPUT_DIR" | python3 scripts/metrics_server.py 9091 > metrics_server.log 2>&1 &
           METRICS_SERVER_PID=$!
           
           # Wait for server to start
@@ -144,6 +134,7 @@ jobs:
           # Verify server is running
           if ! kill -0 $METRICS_SERVER_PID 2>/dev/null; then
             echo "❌ Metrics server failed to start"
+            cat metrics_server.log
             exit 1
           fi
           
