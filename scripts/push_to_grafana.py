@@ -146,33 +146,6 @@ def generate_prometheus_metrics(benchmark_results, git_commit, branch):
 
     return metrics
 
-def generate_influx_metrics(benchmark_results, git_commit, branch):
-    """Generate InfluxDB line protocol format metrics"""
-    lines = []
-    timestamp_ns = int(time.time() * 1_000_000_000)
-
-    for result in benchmark_results:
-        test_name = result['testName']
-        class_name = result['className']
-        method_name = result['methodName']
-        device = result['device']
-        brand = result['brand']
-
-        # InfluxDB line protocol format
-        # measurement,tag1=value1,tag2=value2 field1=value1,field2=value2 timestamp
-        tags = f'test={test_name},class={class_name},method={method_name},branch={branch},device={device},brand={brand},commit={git_commit}'
-
-        if result['medianTimeNs'] > 0:
-            lines.append(
-                f'android_benchmark,{tags} '
-                f'time_ns={result["medianTimeNs"]}i,'
-                f'allocations={result["medianAllocationCount"]}i,'
-                f'iterations={result["iterations"]}i '
-                f'{timestamp_ns}'
-            )
-
-    return lines
-
 def main():
     if len(sys.argv) != 2:
         print("Usage: push_to_grafana.py <benchmark-output-directory>")
@@ -215,7 +188,7 @@ def main():
 
     print(f"\n📊 Total benchmarks extracted: {len(all_results)}")
 
-    # Generate Prometheus format
+    # Generate Prometheus format metrics
     print(f"\n📈 Generating Prometheus metrics...")
     prometheus_metrics = generate_prometheus_metrics(all_results, git_commit, branch)
 
@@ -224,14 +197,6 @@ def main():
 
     print(f"✅ Wrote {len(prometheus_metrics)} metrics to metrics.txt")
 
-    # Generate InfluxDB format
-    print(f"\n📈 Generating InfluxDB metrics...")
-    influx_metrics = generate_influx_metrics(all_results, git_commit, branch)
-
-    with open('metrics_influx.txt', 'w') as f:
-        f.write('\n'.join(influx_metrics))
-
-    print(f"✅ Wrote {len(influx_metrics)} metrics to metrics_influx.txt")
 
     # Display sample metrics
     print("\n📊 Sample Prometheus metrics:")
