@@ -70,12 +70,6 @@ jobs:
             ./gradlew :benchmark:connectedReleaseAndroidTest --continue --stacktrace || true
             echo "✅ Benchmark execution completed"
 
-      - name: Display Results
-        if: always()
-        run: |
-          echo "📊 Benchmark output files:"
-          find benchmark/build/outputs/connected_android_test_additional_output -name "*benchmarkData*.json" -type f || echo "No benchmark files found"
-
       - name: Setup Python
         if: always() && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
         uses: actions/setup-python@v5

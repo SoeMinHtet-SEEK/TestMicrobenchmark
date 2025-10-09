@@ -6,40 +6,36 @@ import sys
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 
-# Global variable to store metrics in memory
-METRICS_DATA = ""
-
-class MetricsHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        if self.path == '/metrics':
-            try:
-                self.send_response(200)
-                self.send_header('Content-Type', 'text/plain; version=0.0.4')
+def create_metrics_handler(metrics_content):
+    """Factory function that creates a handler class with metrics in closure"""
+    class MetricsHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path == '/metrics':
+                try:
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'text/plain; version=0.0.4')
+                    self.end_headers()
+                    self.wfile.write(metrics_content.encode('utf-8'))
+                except Exception as e:
+                    self.send_response(500)
+                    self.end_headers()
+                    self.wfile.write(f"Error: {e}".encode('utf-8'))
+            else:
+                self.send_response(404)
                 self.end_headers()
-                self.wfile.write(METRICS_DATA.encode('utf-8'))
-            except Exception as e:
-                self.send_response(500)
-                self.end_headers()
-                self.wfile.write(f"Error: {e}".encode('utf-8'))
-        else:
-            self.send_response(404)
-            self.end_headers()
 
-    def log_message(self, format, *args):
-        # Suppress default logging
-        pass
+        def log_message(self, format, *args):
+            # Suppress default logging
+            pass
 
-def set_metrics(metrics_content):
-    """Set the metrics content to serve"""
-    global METRICS_DATA
-    METRICS_DATA = metrics_content
+    return MetricsHandler
 
 def start_server(port=9091, metrics_content=""):
     """Start the metrics server"""
-    global METRICS_DATA
-    METRICS_DATA = metrics_content
+    # Create a handler class with metrics in its closure
+    handler_class = create_metrics_handler(metrics_content)
 
-    server = HTTPServer(('127.0.0.1', port), MetricsHandler)
+    server = HTTPServer(('127.0.0.1', port), handler_class)
     print(f"✅ Metrics server started on http://127.0.0.1:{port}/metrics")
 
     # Run server in a thread
